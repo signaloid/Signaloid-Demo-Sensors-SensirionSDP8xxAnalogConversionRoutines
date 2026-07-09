@@ -1,5 +1,5 @@
 /*
- *	Copyright (c) 2024, Signaloid.
+ *	Copyright (c) 2026, Signaloid.
  *
  *	Permission is hereby granted, free of charge, to any person obtaining a copy
  *	of this software and associated documentation files (the "Software"), to deal
@@ -30,122 +30,57 @@
 #include <float.h>
 #include <uxhw.h>
 #include "utilities.h"
+#include "kernel.h"
 
 
 /**
- *	@brief  Implementation of the sign function for distributional values.
+ *	@brief  Sets the Input Variables via call to UxHw Parametric function.
  *
- *	@param  arg	: Sign function argument.
- *	@return double	: The result of the sign function.
- */
-static double
-sign(double arg)
-{
-	if (arg == 0.0)
-	{
-		return 0.0;
-	}
-
-	return arg / fabs(arg);
-}
-
-/**
- *	@brief  Sets the Input Distributions via calls to UxHw API functions.
- *
- *	@param  inputDistributions	: An array of double values, where the function writes the distributional data.
+ *	@param  inputVariables	: An array of double values, where the function writes the distributional data.
  */
 static void
-setInputDistributionsViaUxHwCall(double *  inputDistributions)
+setInputVariablesViaUxHwCall(double * inputVariables)
 {
-	inputDistributions[kInputDistributionIndexAout] = UxHwDoubleUniformDist(
-								kDefaultInputDistributionAoutUniformDistLow,
-								kDefaultInputDistributionAoutUniformDistHigh);
+	inputVariables[kSensirionSDP8xxInputVariableIndexAout] = UxHwDoubleUniformDist(
+		kSensirionSDP8xxDefaultInputDistributionAoutUniformDistLow,
+		kSensirionSDP8xxDefaultInputDistributionAoutUniformDistHigh
+	);
 
-	inputDistributions[kInputDistributionIndexVdd] = UxHwDoubleUniformDist(
-								kDefaultInputDistributionVddUniformDistLow,
-								kDefaultInputDistributionVddUniformDistHigh);
+	inputVariables[kSensirionSDP8xxInputVariableIndexVdd] = UxHwDoubleUniformDist(
+		kSensirionSDP8xxDefaultInputDistributionVddUniformDistLow ,
+		kSensirionSDP8xxDefaultInputDistributionVddUniformDistHigh
+	);
 
 	return;
-}
-
-/**
- *	@brief  Sensor calibration routines for different modes taken from
- *		SDP8xx Analog Datasheet, 2024-07-03.
- *
- *	@param  arguments		: Pointer to command-line arguments struct.
- *	@param  inputDistributions	: The array of input distributions used in the calculation.
- * 	@param  outputDistributions	: An array of of output distributions.
- * 						Writes the result to `outputDistributions[outputSelectValue]`.
- *
- *	@return	double			: Returns the distributional value calculated.
- */
-static double
-calculateSensorOutput(CommandLineArguments *  arguments, double *  inputDistributions, double *  outputDistributions)
-{
-	double	Vdd = inputDistributions[kInputDistributionIndexVdd];
-	double	Aout = inputDistributions[kInputDistributionIndexAout];
-	double	calibratedValue;
-
-	bool	calculateAllOutputs = (arguments->common.outputSelect == kOutputDistributionIndexCalibratedSensorOutputMax);
-
-	if (calculateAllOutputs ||
-		(arguments->common.outputSelect == kOutputDistributionIndexCalibratedSensorOutputSDP8x6Linear500Pa))
-	{
-		calibratedValue = kSensorCalibrationConstantSDP8x6Linear500Pa1 * Aout / Vdd - kSensorCalibrationConstantSDP8x6Linear500Pa2;
-		outputDistributions[kOutputDistributionIndexCalibratedSensorOutputSDP8x6Linear500Pa] = calibratedValue;
-	}
-
-	if (calculateAllOutputs ||
-		(arguments->common.outputSelect == kOutputDistributionIndexCalibratedSensorOutputSDP8x6Linear125Pa))
-	{
-		calibratedValue = kSensorCalibrationConstantSDP8x6Linear125Pa1 * Aout / Vdd - kSensorCalibrationConstantSDP8x6Linear125Pa2;
-		outputDistributions[kOutputDistributionIndexCalibratedSensorOutputSDP8x6Linear125Pa] = calibratedValue;
-	}
-
-	if (calculateAllOutputs ||
-		(arguments->common.outputSelect == kOutputDistributionIndexCalibratedSensorOutputSDP8x6Sqrt500Pa))
-	{
-		calibratedValue = 	sign((Aout / Vdd) - kSensorCalibrationConstantSDP8x6Sqrt500Pa1) *
-					pow((Aout / (Vdd * kSensorCalibrationConstantSDP8x6Sqrt500Pa2)) -
-					kSensorCalibrationConstantSDP8x6Sqrt500Pa3, 2) *
-					kSensorCalibrationConstantSDP8x6Sqrt500Pa4;
-		outputDistributions[kOutputDistributionIndexCalibratedSensorOutputSDP8x6Sqrt500Pa] = calibratedValue;
-	}
-
-	if (calculateAllOutputs ||
-		(arguments->common.outputSelect == kOutputDistributionIndexCalibratedSensorOutputSDP8x6Sqrt125Pa))
-	{
-		calibratedValue = 	sign((Aout / Vdd) - kSensorCalibrationConstantSDP8x6Sqrt125Pa1) *
-					pow((Aout / (Vdd * kSensorCalibrationConstantSDP8x6Sqrt125Pa2)) -
-					kSensorCalibrationConstantSDP8x6Sqrt125Pa3, 2) *
-					kSensorCalibrationConstantSDP8x6Sqrt125Pa4;
-		outputDistributions[kOutputDistributionIndexCalibratedSensorOutputSDP8x6Sqrt125Pa] = calibratedValue;
-	}
-
-	return	calibratedValue;
 }
 
 
 int
 main(int argc, char *  argv[])
 {
-	CommandLineArguments	arguments = {0};
+	CommandLineArguments arguments = { 0 };
 
-	double			calibratedSensorOutput;
-	double *		monteCarloOutputSamples = NULL;
-	clock_t			start;
-	clock_t			end;
-	double			cpuTimeUsedSeconds;
-	double			inputDistributions[kInputDistributionIndexMax];
-	double			outputDistributions[kOutputDistributionIndexCalibratedSensorOutputMax];
-	const char *		outputVariableNames[kOutputDistributionIndexCalibratedSensorOutputMax] =
-				{
-					"Calibrated Sensor Output SDP8x6 Linear 500Pa",
-					"Calibrated Sensor Output SDP8x6 Linear 125Pa",
-					"Calibrated Sensor Output SDP8x6 Square 500Pa",
-					"Calibrated Sensor Output SDP8x6 Square 125Pa",
-				};
-	MeanAndVariance		meanAndVariance;
+	double          calibratedSensorOutput;
+	double *        monteCarloOutputSamples = NULL;
+	clock_t         start;
+	clock_t         end;
+	double          cpuTimeUsedSeconds;
+	double          inputVariables[kSensirionSDP8xxInputVariableIndexMax];
+	double          outputVariables[kSensirionSDP8xxOutputVariableIndexCalibratedSensorOutputMax];
+	const char *    outputVariableNames[kSensirionSDP8xxOutputVariableIndexCalibratedSensorOutputMax] = {
+		"Calibrated Sensor Output SDP8x6 Linear 500Pa",
+		"Calibrated Sensor Output SDP8x6 Linear 125Pa",
+		"Calibrated Sensor Output SDP8x6 Square 500Pa",
+		"Calibrated Sensor Output SDP8x6 Square 125Pa"
+	};
+	const char *    outputVariableDescriptions[kSensirionSDP8xxOutputVariableIndexCalibratedSensorOutputMax] = {
+		"Calibrated Sensor Output SDP8x6 Linear 500Pa",
+		"Calibrated Sensor Output SDP8x6 Linear 125Pa",
+		"Calibrated Sensor Output SDP8x6 Square 500Pa",
+		"Calibrated Sensor Output SDP8x6 Square 125Pa"
+	};
+	const char *    applicationDescription = "Sensirion SDP8xx Analog Conversion Routines";
+	MeanAndVariance meanAndVariance;
 
 	/*
 	 *	Get command line arguments.
@@ -158,36 +93,37 @@ main(int argc, char *  argv[])
 	if (arguments.common.isMonteCarloMode)
 	{
 		monteCarloOutputSamples = (double *) checkedMalloc(
-							arguments.common.numberOfMonteCarloIterations * sizeof(double),
-							__FILE__,
-							__LINE__);
+			arguments.common.numberOfMonteCarloIterations * sizeof(double),
+			__FILE__,
+			__LINE__
+		);
 	}
 
 	/*
 	 *	Start timing.
 	 */
-	if (arguments.common.isTimingEnabled || arguments.common.isBenchmarkingMode)
+	if (arguments.common.isTimingEnabled)
 	{
 		start = clock();
 	}
 
-	for (size_t i = 0; i < arguments.common.numberOfMonteCarloIterations; i++)
+	for (size_t ii = 0; ii < arguments.common.numberOfMonteCarloIterations; ii++)
 	{
 		/*
 		 *	Set input distribution values, inside the main computation
 		 *	loop, so that it can also generate samples in the native
 		 *	Monte Carlo Execution Mode.
 		 */
-		setInputDistributionsViaUxHwCall(inputDistributions);
+		setInputVariablesViaUxHwCall(inputVariables);
 
-		calibratedSensorOutput = calculateSensorOutput(&arguments, inputDistributions, outputDistributions);
+		calibratedSensorOutput = SensirionSDP8xx_calculateOutput(arguments.common.outputSelect, inputVariables, outputVariables);
 
 		/*
 		 *	For this application, `calibratedSensorOutput` is the item we track.
 		 */
 		if (arguments.common.isMonteCarloMode)
 		{
-			monteCarloOutputSamples[i] = calibratedSensorOutput;
+			monteCarloOutputSamples[ii] = calibratedSensorOutput;
 		}
 	}
 
@@ -198,80 +134,68 @@ main(int argc, char *  argv[])
 	if (arguments.common.isMonteCarloMode)
 	{
 		meanAndVariance = calculateMeanAndVarianceOfDoubleSamples(
-					monteCarloOutputSamples,
-					arguments.common.numberOfMonteCarloIterations);
+			monteCarloOutputSamples,
+			arguments.common.numberOfMonteCarloIterations
+		);
 		calibratedSensorOutput = meanAndVariance.mean;
 	}
 
 	/*
 	 *	Stop timing.
 	 */
-	if (arguments.common.isTimingEnabled || arguments.common.isBenchmarkingMode)
+	if (arguments.common.isTimingEnabled)
 	{
-		end = clock();
-		cpuTimeUsedSeconds = ((double)(end - start)) / CLOCKS_PER_SEC;
+		end                 = clock();
+		cpuTimeUsedSeconds  = ((double) (end - start)) / CLOCKS_PER_SEC;
 	}
 
-	if (arguments.common.isBenchmarkingMode)
+	/*
+	 *	Print the results (either in JSON or standard output format).
+	 */
+	if (arguments.common.isOutputJSONMode)
 	{
-		/*
-		 *	In benchmarking mode, we print:
-		 *		(1) single result (for calculating Wasserstein distance to reference)
-		 *		(2) time in microseconds (benchmarking setup expects cpu time in microseconds)
-		 */
-		printf("%lf %" PRIu64 "\n", calibratedSensorOutput, (uint64_t)(cpuTimeUsedSeconds*1000000));
+		printJSONFormattedOutput(
+			&arguments.common,
+			monteCarloOutputSamples,
+			outputVariables,
+			outputVariableNames,
+			kSensirionSDP8xxOutputVariableIndexCalibratedSensorOutputMax,
+			applicationDescription
+		);
 	}
 	else
 	{
-		/*
-		 *	Print the results (either in JSON or standard output format).
-		 */
-		if (!arguments.common.isOutputJSONMode)
-		{
-			if (arguments.common.outputSelect == kOutputDistributionIndexCalibratedSensorOutputMax)
-			{
-				for (size_t i = 0; i < kOutputDistributionIndexCalibratedSensorOutputMax; i++)
-				{
-					printCalibratedValueAndProbabilities(outputDistributions[i], outputVariableNames[i]);
-				}
-			}
-			else
-			{
-				printCalibratedValueAndProbabilities(
-					calibratedSensorOutput,
-					outputVariableNames[arguments.common.outputSelect]);
-			}
-		}
-		else
-		{
-			printJSONFormattedOutput(
-				&arguments,
-				monteCarloOutputSamples,
-				outputDistributions,
-				outputVariableNames);
-		}
+		printHumanConsumableOutput(
+			&arguments.common,
+			kSensirionSDP8xxOutputVariableIndexCalibratedSensorOutputMax,
+			outputVariables,
+			outputVariableNames,
+			outputVariableDescriptions,
+			monteCarloOutputSamples
+		);
+	}
 
-		/*
-		 *	Print timing result.
-		 */
-		if (arguments.common.isTimingEnabled)
-		{
-			printf("\nCPU time used: %lf seconds\n", cpuTimeUsedSeconds);
-		}
+	/*
+	 *	Print timing result.
+	 */
+	if (arguments.common.isTimingEnabled)
+	{
+		printf("\nCPU time used: %lf seconds\n", cpuTimeUsedSeconds);
+	}
 
-		/*
-		 *	Write output data.
-		 */
-		if (arguments.common.isWriteToFileEnabled)
-		{
-			if (writeOutputDoubleDistributionsToCSV(
+	/*
+	 *	Write output data.
+	 */
+	if (arguments.common.isWriteToFileEnabled)
+	{
+		if (writeOutputDoubleDistributionsToCSV(
 				arguments.common.outputFilePath,
-				outputDistributions,
+				outputVariables,
 				outputVariableNames,
-				kOutputDistributionIndexCalibratedSensorOutputMax))
-			{
-				return kCommonConstantReturnTypeError;
-			}
+				kSensirionSDP8xxOutputVariableIndexCalibratedSensorOutputMax
+		))
+		{
+			return kCommonConstantReturnTypeError;
 		}
 	}
 
@@ -281,8 +205,11 @@ main(int argc, char *  argv[])
 	 */
 	if (arguments.common.isMonteCarloMode)
 	{
-		saveMonteCarloDoubleDataToDataDotOutFile(monteCarloOutputSamples, (uint64_t)(cpuTimeUsedSeconds*1000000), arguments.common.numberOfMonteCarloIterations);
-		
+		saveMonteCarloDoubleDataToDataDotOutFile(
+			monteCarloOutputSamples, (uint64_t) (cpuTimeUsedSeconds * 1000000),
+			arguments.common.numberOfMonteCarloIterations
+		);
+
 		free(monteCarloOutputSamples);
 	}
 
