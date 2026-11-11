@@ -1,5 +1,5 @@
 /*
- *	Copyright (c) 2026, Signaloid.
+ *	Copyright (c) 2024-2026, Signaloid.
  *
  *	Permission is hereby granted, free of charge, to any person obtaining a copy
  *	of this software and associated documentation files (the "Software"), to deal
@@ -37,7 +37,6 @@ printUsage(void)
 		"\t[-S, --select-output <output : int>] (Compute 0-indexed output. Calculate all possible outputs if equal to %d. Default value: %d.)\n"
 		"\t[-M, --multiple-executions <Number of executions : int (Default: 1)>] (Repeated execute kernel for benchmarking.)\n"
 		"\t[-T, --time] (Timing mode: Times and prints the timing of the kernel execution.)\n"
-		"\t[-b, --benchmarking] (Benchmarking mode: Generate outputs in format for benchmarking.)\n"
 		"\t[-j, --json] (Print output in JSON format.)\n"
 		"\t[-h, --help] (Display this help message.)\n",
 		kSensirionSDP8xxOutputVariableIndexCalibratedSensorOutputMax,
@@ -48,7 +47,12 @@ printUsage(void)
 	return;
 }
 
-static void
+/**
+ *	@brief	Set the default values for the command-line arguments.
+ *
+ *	@param	arguments	: command-line arguments pointer.
+ */
+CommonConstantReturnType
 setDefaultCommandLineArguments(CommandLineArguments * arguments)
 {
 	/*
@@ -69,8 +73,41 @@ setDefaultCommandLineArguments(CommandLineArguments * arguments)
 	};
 #pragma GCC diagnostic pop
 
-	return;
+	return kCommonConstantReturnTypeSuccess;
 }
+
+#ifdef NO_OS_AVAILABLE
+CommonConstantReturnType
+setNoOSCommandLineArguments(CommandLineArguments * arguments)
+{
+	if (arguments == NULL)
+	{
+		fputs("Error: The provided pointer to arguments is NULL.\n", stderr);
+
+		return kCommonConstantReturnTypeError;
+	}
+
+	/*
+	 *	Start from the defaults so that every field is initialized, then
+	 *	override the ones the no-OS build fixes. This demo has no
+	 *	demo-specific fields beyond `common`, and simulates no path, so
+	 *	there is no step count to override either.
+	 */
+	if (setDefaultCommandLineArguments(arguments) != kCommonConstantReturnTypeSuccess)
+	{
+		return kCommonConstantReturnTypeError;
+	}
+
+	arguments->common.numberOfMonteCarloIterations  = 1;
+	arguments->common.outputSelect                  = kSensirionSDP8xxOutputVariableIndexCalibratedSensorOutputMax;
+	arguments->common.isTimingEnabled               = false;
+	arguments->common.isMonteCarloMode              = false;
+	arguments->common.isOutputJSONMode              = false;
+	arguments->common.isWriteToFileEnabled          = false;
+
+	return kCommonConstantReturnTypeSuccess;
+}
+#endif
 
 CommonConstantReturnType
 getCommandLineArguments(
@@ -78,6 +115,19 @@ getCommandLineArguments(
 	char *                  argv[],
 	CommandLineArguments *  arguments)
 {
+#ifdef NO_OS_AVAILABLE
+	/*
+	 *	The no-OS build has no command line to parse, so ignore `argc` and
+	 *	`argv` and use the hard-coded configuration instead.
+	 */
+	(void) argc;
+	(void) argv;
+
+	puts("Using hard coded command line arguments");
+
+	return setNoOSCommandLineArguments(arguments);
+
+#else
 	DemoOption demoSpecificOptions = { 0 };
 
 	if (arguments == NULL)
@@ -87,7 +137,10 @@ getCommandLineArguments(
 		return kCommonConstantReturnTypeError;
 	}
 
-	setDefaultCommandLineArguments(arguments);
+	if (setDefaultCommandLineArguments(arguments) != kCommonConstantReturnTypeSuccess)
+	{
+		return kCommonConstantReturnTypeError;
+	}
 
 	/*
 	 *	This application example has no application specific arguments.
@@ -141,7 +194,7 @@ getCommandLineArguments(
 	}
 
 	/*
-	 *	If a single output is selected, we must be in benchmarking mode or Monte Carlo mode.
+	 *	If a single output is selected, we must be in Monte Carlo mode.
 	 */
 	if (arguments->common.outputSelect > kSensirionSDP8xxOutputVariableIndexCalibratedSensorOutputMax)
 	{
@@ -151,19 +204,23 @@ getCommandLineArguments(
 			arguments->common.outputSelect,
 			kSensirionSDP8xxOutputVariableIndexCalibratedSensorOutputMax
 		);
+
+		return kCommonConstantReturnTypeError;
 	}
 	/*
-	 *	When all outputs are selected, we cannot be in benchmarking mode or Monte Carlo mode.
+	 *	When all outputs are selected, we cannot be in Monte Carlo mode.
 	 */
 	else if (arguments->common.outputSelect == kSensirionSDP8xxOutputVariableIndexCalibratedSensorOutputMax)
 	{
-		if ((arguments->common.isBenchmarkingMode) || (arguments->common.isMonteCarloMode))
+		if (arguments->common.isMonteCarloMode)
 		{
-			fprintf(stderr, "Error: Please select a single output when in benchmarking mode or Monte Carlo mode.\n");
+			fprintf(stderr, "Error: Please select a single output when in Monte Carlo mode.\n");
 
 			return kCommonConstantReturnTypeError;
 		}
 	}
 
 	return kCommonConstantReturnTypeSuccess;
+
+#endif
 }

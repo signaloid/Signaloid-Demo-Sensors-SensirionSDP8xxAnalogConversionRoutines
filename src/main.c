@@ -1,5 +1,5 @@
 /*
- *	Copyright (c) 2026, Signaloid.
+ *	Copyright (c) 2024-2026, Signaloid.
  *
  *	Permission is hereby granted, free of charge, to any person obtaining a copy
  *	of this software and associated documentation files (the "Software"), to deal
@@ -32,72 +32,67 @@
 #include "utilities.h"
 #include "kernel.h"
 
+#ifdef NO_OS_AVAILABLE
 
-/**
- *	@brief  Sets the Input Variables via call to UxHw Parametric function.
- *
- *	@param  inputVariables	: An array of double values, where the function writes the distributional data.
- */
-static void
-setInputVariablesViaUxHwCall(double * inputVariables)
-{
-	inputVariables[kSensirionSDP8xxInputVariableIndexAout] = UxHwDoubleUniformDist(
-		kSensirionSDP8xxDefaultInputDistributionAoutUniformDistLow,
-		kSensirionSDP8xxDefaultInputDistributionAoutUniformDistHigh
-	);
-
-	inputVariables[kSensirionSDP8xxInputVariableIndexVdd] = UxHwDoubleUniformDist(
-		kSensirionSDP8xxDefaultInputDistributionVddUniformDistLow ,
-		kSensirionSDP8xxDefaultInputDistributionVddUniformDistHigh
-	);
-
-	return;
-}
-
+void
+returnZeroNoOS(void);
+#endif
 
 int
 main(int argc, char *  argv[])
 {
 	CommandLineArguments arguments = { 0 };
 
-	double          calibratedSensorOutput;
-	double *        monteCarloOutputSamples = NULL;
-	clock_t         start;
-	clock_t         end;
-	double          cpuTimeUsedSeconds;
-	double          inputVariables[kSensirionSDP8xxInputVariableIndexMax];
-	double          outputVariables[kSensirionSDP8xxOutputVariableIndexCalibratedSensorOutputMax];
-	const char *    outputVariableNames[kSensirionSDP8xxOutputVariableIndexCalibratedSensorOutputMax] = {
+	double *                    monteCarloOutputSamples = NULL;
+	clock_t                     start               = 0;
+	clock_t                     end                 = 0;
+	double                      cpuTimeUsedSeconds  = 0.0;
+	double                      outputVariables[kSensirionSDP8xxOutputVariableIndexCalibratedSensorOutputMax] = { 0 };
+	const char *                outputVariableNames[kSensirionSDP8xxOutputVariableIndexCalibratedSensorOutputMax] = {
 		"Calibrated Sensor Output SDP8x6 Linear 500Pa",
 		"Calibrated Sensor Output SDP8x6 Linear 125Pa",
 		"Calibrated Sensor Output SDP8x6 Square 500Pa",
 		"Calibrated Sensor Output SDP8x6 Square 125Pa"
 	};
-	const char *    outputVariableDescriptions[kSensirionSDP8xxOutputVariableIndexCalibratedSensorOutputMax] = {
+	const char *                outputVariableDescriptions[kSensirionSDP8xxOutputVariableIndexCalibratedSensorOutputMax] = {
 		"Calibrated Sensor Output SDP8x6 Linear 500Pa",
 		"Calibrated Sensor Output SDP8x6 Linear 125Pa",
 		"Calibrated Sensor Output SDP8x6 Square 500Pa",
 		"Calibrated Sensor Output SDP8x6 Square 125Pa"
 	};
-	const char *    applicationDescription = "Sensirion SDP8xx Analog Conversion Routines";
-	MeanAndVariance meanAndVariance;
+	kOutputVariableTypeIndex    outputVariableTypes[kSensirionSDP8xxOutputVariableIndexCalibratedSensorOutputMax] = {
+		kOutputVariableTypeDistribution,
+		kOutputVariableTypeDistribution,
+		kOutputVariableTypeDistribution,
+		kOutputVariableTypeDistribution
+	};
+	const char *                applicationDescription = "Sensirion SDP8xx Analog Conversion Routines";
 
 	/*
-	 *	Get command line arguments.
+	 *	Get command-line arguments. In the no-OS build there is no command
+	 *	line, so this instead applies the hard-coded configuration in
+	 *	`setNoOSCommandLineArguments()`.
 	 */
 	if (getCommandLineArguments(argc, argv, &arguments))
 	{
 		return kCommonConstantReturnTypeError;
 	}
 
-	if (arguments.common.isMonteCarloMode)
-	{
-		monteCarloOutputSamples = (double *) checkedMalloc(
-			arguments.common.numberOfMonteCarloIterations * sizeof(double),
-			__FILE__,
-			__LINE__
-		);
-	}
+	/*
+	 *	MonteCarlo output samples are used even in the UxHw use case to
+	 *	store the result of the single distributional evaluation.
+	 */
+	monteCarloOutputSamples = (double *) checkedMalloc(
+		(arguments.common.numberOfMonteCarloIterations > 0 ? arguments.common.numberOfMonteCarloIterations : 1) * sizeof(double),
+		__FILE__,
+		__LINE__
+	);
+
+	const bool isScalarOutputSelected = isSelectedOutputScalar(
+		&arguments.common,
+		outputVariableTypes,
+		kSensirionSDP8xxOutputVariableIndexCalibratedSensorOutputMax
+	);
 
 	/*
 	 *	Start timing.
@@ -107,37 +102,49 @@ main(int argc, char *  argv[])
 		start = clock();
 	}
 
-	for (size_t ii = 0; ii < arguments.common.numberOfMonteCarloIterations; ii++)
-	{
-		/*
-		 *	Set input distribution values, inside the main computation
-		 *	loop, so that it can also generate samples in the native
-		 *	Monte Carlo Execution Mode.
-		 */
-		setInputVariablesViaUxHwCall(inputVariables);
-
-		calibratedSensorOutput = SensirionSDP8xx_calculateOutput(arguments.common.outputSelect, inputVariables, outputVariables);
-
-		/*
-		 *	For this application, `calibratedSensorOutput` is the item we track.
-		 */
-		if (arguments.common.isMonteCarloMode)
-		{
-			monteCarloOutputSamples[ii] = calibratedSensorOutput;
-		}
-	}
-
 	/*
-	 *	If not doing Laplace version, then approximate the cost of the third phase of
-	 *	Monte Carlo (post-processing), by calculating the mean and variance.
+	 *	Dispatch to the mode-specific kernel. The two functions called here
+	 *	size the `inputVariables` scratch array and forward: the Monte Carlo
+	 *	loop (when applicable) lives one level down, inside
+	 *	`sensirionSDP8xxMonteCarlo()`, and the single distributional
+	 *	evaluation of UxHw mode inside `sensirionSDP8xxUxHw()`.
+	 *	Both take the fields they need as scalars, so this is the only place
+	 *	that unpacks `CommandLineArguments` for the kernel.
+	 *
+	 *	Every output of this demo is a `kOutputVariableTypeDistribution`
+	 *	(see `outputVariableTypes` above and `signaloid.yaml`), so there is
+	 *	no scalar output to special-case here, unlike the GBM demo this
+	 *	structure is modelled on.
 	 */
 	if (arguments.common.isMonteCarloMode)
 	{
-		meanAndVariance = calculateMeanAndVarianceOfDoubleSamples(
-			monteCarloOutputSamples,
-			arguments.common.numberOfMonteCarloIterations
+		SensirionSDP8xxCalculateOutputMonteCarlo(
+			arguments.common.outputSelect,
+			arguments.common.numberOfMonteCarloIterations,
+			outputVariables,
+			monteCarloOutputSamples
 		);
-		calibratedSensorOutput = meanAndVariance.mean;
+
+		/*
+		 *	If not doing UxHw version, then approximate the cost of the third phase of
+		 *	Monte Carlo (post-processing), by calculating the mean and variance.
+		 *	The result is not used. Only the cost matters, for the timing result.
+		 */
+		if (!isScalarOutputSelected)
+		{
+			calculateMeanAndVarianceOfDoubleSamples(
+				monteCarloOutputSamples,
+				arguments.common.numberOfMonteCarloIterations
+			);
+		}
+	}
+	else
+	{
+		SensirionSDP8xxCalculateOutputUxHw(
+			arguments.common.outputSelect,
+			outputVariables,
+			monteCarloOutputSamples
+		);
 	}
 
 	/*
@@ -160,7 +167,8 @@ main(int argc, char *  argv[])
 			outputVariables,
 			outputVariableNames,
 			kSensirionSDP8xxOutputVariableIndexCalibratedSensorOutputMax,
-			applicationDescription
+			applicationDescription,
+			outputVariableTypes
 		);
 	}
 	else
@@ -171,7 +179,8 @@ main(int argc, char *  argv[])
 			outputVariables,
 			outputVariableNames,
 			outputVariableDescriptions,
-			monteCarloOutputSamples
+			monteCarloOutputSamples,
+			outputVariableTypes
 		);
 	}
 
@@ -207,11 +216,16 @@ main(int argc, char *  argv[])
 	{
 		saveMonteCarloDoubleDataToDataDotOutFile(
 			monteCarloOutputSamples, (uint64_t) (cpuTimeUsedSeconds * 1000000),
-			arguments.common.numberOfMonteCarloIterations
+			isScalarOutputSelected ? 1 : arguments.common.numberOfMonteCarloIterations
 		);
-
-		free(monteCarloOutputSamples);
 	}
+	free(monteCarloOutputSamples);
+
+#ifdef NO_OS_AVAILABLE
+	returnZeroNoOS();
+#else
 
 	return 0;
+
+#endif
 }
